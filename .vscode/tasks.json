@@ -1,0 +1,64 @@
+{
+    "version": "2.0.0",
+    "windows": {
+        "options": {
+            "shell": {
+                "executable": "c:\\windows\\sysnative\\bash.exe",
+                "args": [
+                    "-c"
+                ]
+            }
+        }
+    },
+    "tasks": [
+        {
+            "label": "build hello world on WSL",
+            "type": "shell",
+            "command": "gcc",
+            "args": [
+                "-DEVAL",
+                "-std=gnu11",
+                "-O2",
+                "-pipe",
+                "-static",
+                "-s",
+                "-o",
+                "/mnt/c/Users/Andrea Finazzi/OneDrive - Politecnico di Milano/Documents/Università/Corsi/Anno II/API/progetto-2019/execution.out",
+                "main.c",
+                "-lm"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "type": "shell",
+            "label": "gcc build active file",
+            "command": "/usr/bin/gcc",
+            "args": [
+                "-g",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}"
+            ],
+            "options": {
+                "cwd": "/usr/bin"
+            }
+        },
+        {
+            "type": "shell",
+            "label": "gcc-7 build active file",
+            "command": "/usr/bin/gcc-7",
+            "args": [
+                "-g",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}"
+            ],
+            "options": {
+                "cwd": "/usr/bin"
+            }
+        }
+    ]
+}
