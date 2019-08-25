@@ -2,17 +2,18 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdint.h>
 
 #define CHAR_MIN_VAL 45
 
-#define HT_PRIME_A 57
-#define HT_PRIME_B 151
-#define HT_MAX_LOAD_RATIO_100 40
+#define HT_PRIME_A 54367
+#define HT_PRIME_B 90947
+#define HT_MAX_LOAD_RATIO_100 20
 #define HT_REL_SIZE 67
-#define HT_ENT_SIZE 100103
-#define HT_ENT_RELS_SIZE 9739
-#define HT_REL_ENTS_SRCS_SIZE 4049
-#define REPORT_ENTITIES_ARRAY_SIZE 100103
+#define HT_ENT_SIZE 100109
+#define HT_ENT_RELS_SIZE 29
+#define HT_REL_ENTS_SRCS_SIZE 29
+#define REPORT_ENTITIES_ARRAY_SIZE 1024
 
 #define COMMAND_ADDENT "addent"
 #define COMMAND_DELENT "delent"
@@ -124,7 +125,7 @@ struct rbt_rel_el_s {
     struct rbt_rel_el_s* left;
     struct rbt_rel_el_s* right;
     color_t color;
-    // Relations sources sub-table
+    // Relations dests sub-tree
     rbt_rel_ents_t* ents_tree;
 };
 
@@ -222,30 +223,50 @@ int next_prime(int x) {
     return x;
 }
 
-// Double hashing - hash function
 int ht_hash(const char *val, const int size, const int attempt) {
+#define FNV_PRIME_32 16777619
+#define FNV_OFFSET_32 2166136261U
+    uint32_t hash = FNV_OFFSET_32, i;
+        for(i = 0; i < (uint32_t) strlen(val); i++)
+        {
+            hash = hash ^ (val[i] - CHAR_MIN_VAL); // xor next byte into the bottom of the hash
+            hash = hash * FNV_PRIME_32; // Multiply by prime number found to work well
+        }
+        return (hash + attempt * HT_PRIME_A) % size;
+}
+
+int ht_hash_ptr(const void* val, const int size, const int attempt) {
+    long hash_a = 0, hash_b = 0;
+
+    hash_a = hash_a + (long) val / 4;
+
+    return ((int) hash_a + (attempt)) % size;
+}
+
+// Double hashing - hash function
+int ht_hash_old(const char *val, const int size, const int attempt) {
     long hash_a = 0, hash_b = 0;
     int val_len = (int) strlen(val);
 
     for (int i = 0; i < val_len; i++) {
-        hash_a = hash_a + (long) HT_PRIME_A * (val_len - (i + 1)) * (val[i] - CHAR_MIN_VAL);
-//        hash_a = hash_a % size;
+        hash_a = hash_a + (long) HT_PRIME_A * (val_len - (i + 1)) * (val[i]);
+        hash_a = hash_a % size;
     }
 
     if (attempt > 0) {
         for (int i = 0; i < val_len; i++) {
-            hash_b = hash_b + (long) HT_PRIME_B * (val_len - (i + 1)) * (val[i] - CHAR_MIN_VAL);
-//        hash_b = hash_b % size;
+            hash_b = hash_b + (long) HT_PRIME_B * (val_len - (i + 1)) * (val[i]);
+            hash_b = hash_b % size;
         }
     }
 
     return ((int) hash_a + (attempt * ((int) hash_b + 1))) % size;
 }
 
-int ht_hash_ptr(const void* val, const int size, const int attempt) {
+int ht_hash_ptr_old(const void* val, const int size, const int attempt) {
     long hash_a = 0, hash_b = 0;
 
-    hash_a = hash_a + (long) HT_PRIME_A * (long) val;
+    hash_a = hash_a + (long) val;
     hash_a = hash_a % size;
 
     if (attempt > 0) {
@@ -340,7 +361,7 @@ void ht_ent_resize(ht_ent_t* ht, const int new_size) {
     ht_ent_init(tmp_ht, next_prime(new_size));
 
     // rehash elements
-    for (int i = 0; i < tmp_ht->size; ++i) {
+    for (int i = 0; i < ht->size; ++i) {
         ht_ent_el_t* item = ht->table[i];
         if (item != NULL && item != &HT_ENT_DELETED_ITEM) {
             ht_ent_insert(tmp_ht, item);
@@ -356,7 +377,8 @@ void ht_ent_resize(ht_ent_t* ht, const int new_size) {
     ht->table = tmp_ht->table;
     tmp_ht->table = tmp_table;
 
-    ht_ent_free(tmp_ht);
+    free(tmp_ht->table);
+    free(tmp_ht);
 }
 
 // Insert new relation
@@ -369,7 +391,7 @@ void ht_ent_insert(ht_ent_t* ht, ht_ent_el_t *el) {
     int index = ht_hash(el->id, ht->size, 0);
     ht_ent_el_t* cur_item = ht->table[index];
     int i = 1;
-    while (cur_item != NULL) {
+    while (cur_item != NULL && cur_item != &HT_ENT_DELETED_ITEM) {
         index = ht_hash(el->id, ht->size, i);
         cur_item = ht->table[index];
         i++;
@@ -458,7 +480,7 @@ void ht_ent_rels_resize(ht_ent_rels_t* ht, const int new_size) {
     ht_ent_rels_init(tmp_ht, next_prime(new_size));
 
     // rehash elements
-    for (int i = 0; i < tmp_ht->size; ++i) {
+    for (int i = 0; i < ht->size; ++i) {
         ht_ent_rels_el_t* item = ht->table[i];
         if (item != NULL && item != &HT_ENT_RELS_DELETED_ITEM) {
             ht_ent_rels_insert(tmp_ht, item);
@@ -474,7 +496,8 @@ void ht_ent_rels_resize(ht_ent_rels_t* ht, const int new_size) {
     ht->table = tmp_ht->table;
     tmp_ht->table = tmp_table;
 
-    ht_ent_rels_free(tmp_ht);
+    free(tmp_ht->table);
+    free(tmp_ht);
 }
 
 // Insert new relation
@@ -487,7 +510,7 @@ void ht_ent_rels_insert(ht_ent_rels_t* ht, ht_ent_rels_el_t *el) {
     int index = ht_hash(el->id, ht->size, 0);
     ht_ent_rels_el_t* cur_item = ht->table[index];
     int i = 1;
-    while (cur_item != NULL) {
+    while (cur_item != NULL && cur_item != &HT_ENT_RELS_DELETED_ITEM) {
         index = ht_hash(el->id, ht->size, i);
         cur_item = ht->table[index];
         i++;
@@ -538,8 +561,8 @@ ht_ent_rels_el_t* ht_ent_rels_search(ht_ent_rels_t* ht, char *id, rbt_rel_ents_e
     ht_ent_rels_el_t* item = ht->table[index];
     int i = 1;
     if (ent_node_key != NULL) {
-        while (item != &HT_ENT_RELS_DELETED_ITEM && item != NULL) {
-            if (item->rbt_node_key == ent_node_key) {
+        while (item != NULL) {
+            if (item != &HT_ENT_RELS_DELETED_ITEM && item->rbt_node_key == ent_node_key) {
                 return item;
             }
             index = ht_hash(id, ht->size, i);
@@ -583,7 +606,7 @@ void ht_rel_ents_srcs_resize(ht_rel_ents_srcs_t* ht, const int new_size) {
     ht_rel_ents_srcs_init(tmp_ht, next_prime(new_size));
 
     // rehash elements
-    for (int i = 0; i < tmp_ht->size; ++i) {
+    for (int i = 0; i < ht->size; ++i) {
         ht_ent_el_t* item = ht->table[i];
         if (item != NULL && item != &HT_ENT_DELETED_ITEM) {
             ht_rel_ents_srcs_insert(tmp_ht, item);
@@ -617,7 +640,7 @@ void ht_rel_ents_srcs_insert(ht_rel_ents_srcs_t* ht, ht_ent_el_t *el) {
     int index = ht_hash_ptr(el, ht->size, 0);
     ht_ent_el_t* cur_item = ht->table[index];
     int i = 1;
-    while (cur_item != NULL) {
+    while (cur_item != NULL && cur_item != &HT_REL_ENTS_SRCS_DELETED_ITEM) {
         index = ht_hash_ptr(el, ht->size, i);
         cur_item = ht->table[index];
         i++;
@@ -1435,13 +1458,13 @@ int main(int argc, char const *argv[]) {
                         ht_ent_delete(&ht_ent, ent_orig->id);
                     }
 
-//                    free(id_orig);
                 } else {
                     // DELREL
                     sscanf(params, "%*[\"]%[^\"]%*[ \"]%[^\"]%*[ \"]%[^\"]", id_orig, id_dest, id_rel);
 
                     ht_ent_el_t* ent_orig = ht_ent_search(&ht_ent, id_orig);
                     ht_ent_el_t* ent_dest = ht_ent_search(&ht_ent, id_dest);
+
 
                     if (ent_orig != NULL && ent_dest) {
                         rbt_rel_el_t* rel = rbt_rel_search(&rbt_rel, rbt_rel.root, id_rel);
@@ -1461,7 +1484,7 @@ int main(int argc, char const *argv[]) {
                                     // Remove rbt node from rbt tree
                                     ent_node = rbt_rel_ents_delete(rel->ents_tree, ent_node);
                                     ent_node->key->count--;
-                                    // Remove pointer ent_node (or equivalents)
+                                    // Remove pointer ent_node from ent_node sources hashtable
                                     ht_rel_ents_srcs_delete(ent_node->key->sources, ent_orig);
                                     // Remove outgoing rel from ent_orig->rels_out
                                     ht_ent_rels_delete(ent_orig->rels_out, rel->id, ent_node);
@@ -1491,15 +1514,15 @@ int main(int argc, char const *argv[]) {
                 break;
             case 'r':
                 // REPORT
+
                 if (rbt_rel.root != rbt_rel.nil) {
                     // Same-Rel-Same-Count entities array and counter
-                    int entities_array_size = REPORT_ENTITIES_ARRAY_SIZE;
                     int i = 0;
                     // First rel in tree
                     rbt_rel_el_t* rel = rbt_rel_minimum(&rbt_rel, rbt_rel.root);
                     // Iterate over relations from min to max
                     while (true) {
-                        fputs("\"", stdout);
+                        fputc('\"', stdout);
                         fputs(rel->id, stdout);
                         fputs("\" ", stdout);
                         // Iterate over SRSC entities
@@ -1512,6 +1535,9 @@ int main(int argc, char const *argv[]) {
                             if (i >= SRSC_size) {
                                 SRSC_entities = (char**) realloc(SRSC_entities, SRSC_size * 2);
                                 SRSC_size = SRSC_size * 2;
+                                for (int j = i; j < SRSC_size; ++j) {
+                                    SRSC_entities[j] = NULL;
+                                }
                             }
 
                             // NEXT ENT
